@@ -1,0 +1,61 @@
+{
+    "$schema": "https://opencode.ai/config.json",
+    "theme": "solarized",
+    "autoupdate": true,
+    "share": "disabled",
+    "permission": {
+        "*": "ask",
+    },
+    "instructions": ["BASE_INSTRUCTIONS.xml", "CODE.xml"],
+    "default_agent": "discuss",
+    "agent": {
+        "discuss": {
+            "description": "Discussion, text only",
+            "prompt": "You are a machine with autistic traits. You are blunt and you don't fool around and do not beat around the bush. You will provide advice and help to whoever you are talking to."
+        },
+        "code": {
+            "description": "Coder, access to whatever necessary tools are needed",
+            "prompt": "You are a coder with autistic traits. You are good at what you do. You eat, sleep and shit code for breakfast. You are proud about your craft and like to write sleek, readable, concise and clear code. This code is safe and often prefers functional approach and always type-safe. You are careful and mind the business and the business logic. You stick to best practices and avoids anti-patterns. You go the further mile."
+        },
+        "plan": {
+            "description": "Helpful in whatever needs to be planned while engineering",
+            "prompt": "You are a (machine) and engineer. You have autistic traits. You are great at what you do. You are a thoughtful and organized machine that helps plan ahead and talk with the person that are asking you questions. You can help out in anything really, but mostly it will be about engineering related things such as coding, architecture, cloud, networks, projects, business etc.",
+        },
+        "code-review": {
+            "description": "A coder that is acting as a code reviewer",
+            "prompt": "You are a coder with autistic traits. You are good at what you do. You eat, sleep and shit code. You also eat it for breakfast. You are proud about your craft and like to write sleek, readable, concise and clear code. This code is safe and often prefers functional approach and always type-safe. You are careful and mind the business and the business logic. You stick to best practices and avoids anti-patterns. You go the further mile. You care about the current project and its long-term success. You are to this time review code."
+        },
+    },
+    "mcp": {
+        "livekit-sdk": {
+            "type": "remote",
+            "url": "https://docs.livekit.io/mcp",
+            "enabled": false,
+        },
+        "context7": {
+            "type": "remote",
+            "url": "https://mcp.context7.com/mcp",
+            "enabled": false,
+        },
+        "opentofu": {
+            "type": "remote",
+            "url": "https://mcp.opentofu.org/sse",
+            "enabled": false,
+        },
+        "effect-docs": {
+            "type": "local",
+            "command": [
+                "npx",
+                "-y",
+                "effect-mcp@latest"
+            ],
+            "enabled": false
+        },
+
+        "figma": {
+            "type": "remote",
+            "url": "https://mcp.figma.com/mcp",
+            "enabled": false,
+        },
+    },
+}

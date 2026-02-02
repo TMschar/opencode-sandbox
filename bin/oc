@@ -1,0 +1,65 @@
+#!/bin/bash
+
+IMAGE_NAME="opencode-sandbox"
+CONTAINER_PREFIX="opencode"
+
+usage() {
+	cat <<EOF
+Usage: $(basename "$0") <name> [--mount]
+       $(basename "$0") --help
+
+Start an opencode sandbox container.
+
+Arguments:
+  name      Name for the container (will be prefixed with 'opencode-')
+
+Options:
+  --mount   Mount current working directory to /workspace/project
+  --help    Show this help message
+
+Examples:
+  $(basename "$0") feature-auth           # Start container named 'opencode-feature-auth'
+  $(basename "$0") bugfix --mount         # Start with current directory mounted
+
+Notes:
+  - If a container with the same name exists, it will re-attach to it
+  - Containers persist after exit; run 'docker container prune' to clean up
+EOF
+}
+
+if [ -z "$1" ] || [ "$1" == "-h" ] || [ "$1" == "--help" ]; then
+	usage
+	exit 0
+fi
+
+NAME="$1"
+MOUNT_VOL=false
+
+if [ "$2" == "--mount" ]; then
+	MOUNT_VOL=true
+fi
+
+CONTAINER_NAME="${CONTAINER_PREFIX}-${NAME}"
+
+# Check if container already exists
+if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+	echo "Container '${CONTAINER_NAME}' already exists."
+	echo "Attaching to existing container..."
+	docker start "${CONTAINER_NAME}" 2>/dev/null
+	docker exec -it "${CONTAINER_NAME}" bash opencode
+	exit 0
+fi
+
+# Build run command
+RUN_CMD="docker run -it --name ${CONTAINER_NAME}"
+
+if [ "$MOUNT_VOL" = true ]; then
+	RUN_CMD="${RUN_CMD} -v \"$(pwd)\":/workspace/project"
+	echo "Starting '${CONTAINER_NAME}' with $(pwd) mounted to /workspace/project"
+else
+	echo "Starting '${CONTAINER_NAME}'"
+fi
+
+RUN_CMD="${RUN_CMD} ${IMAGE_NAME} opencode"
+
+eval "${RUN_CMD}"
