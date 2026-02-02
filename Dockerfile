@@ -6,7 +6,7 @@ WORKDIR /workspace
 RUN <<EOF
     apt update
     apt upgrade -y
-    apt install -y curl wget ca-certificates unzip ripgrep
+    apt install -y curl wget ca-certificates unzip ripgrep fd-find git
 EOF
 
 RUN <<EOF

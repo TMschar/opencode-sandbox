@@ -44,9 +44,22 @@ CONTAINER_NAME="${CONTAINER_PREFIX}-${NAME}"
 # Check if container already exists
 if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
 	echo "Container '${CONTAINER_NAME}' already exists."
+	
+	# Check if mount target is already occupied when using --mount
+	if [ "$MOUNT_VOL" = true ]; then
+		if docker exec "${CONTAINER_NAME}" test -d /workspace/project 2>/dev/null; then
+			echo "Error: Mount target /workspace/project already exists in container '${CONTAINER_NAME}'"
+			echo "Either:"
+			echo "  1. Use without --mount, or"
+			echo "  2. Start a new container with a different name, or"
+			echo "  3. Remove the directory inside the container first"
+			exit 1
+		fi
+	fi
+	
 	echo "Attaching to existing container..."
 	docker start "${CONTAINER_NAME}" 2>/dev/null
-	docker exec -it "${CONTAINER_NAME}" bash opencode
+	docker exec -it "${CONTAINER_NAME}" bash -c "opencode"
 	exit 0
 fi
 
