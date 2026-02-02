@@ -6,7 +6,7 @@
     "permission": {
         "*": "ask",
     },
-    "instructions": ["BASE_INSTRUCTIONS.xml", "CODE.xml"],
+    "instructions": ["BASE_INSTRUCTIONS.xml", "TOOLS.xml", "CODE.xml"],
     "default_agent": "discuss",
     "agent": {
         "discuss": {

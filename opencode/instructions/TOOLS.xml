@@ -1,0 +1,5 @@
+<tool_instructions>
+    <base_instruction>Prefer faster tools over slower tools. Use the tools in this config</base_instruction>
+    <grep>use ripgrep rg instead</grep>
+    <find>use fd instead</find>
+</tool_instructions>
