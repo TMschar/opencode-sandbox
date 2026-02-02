@@ -9,9 +9,13 @@ RUN <<EOF
     apt install -y curl wget ca-certificates unzip
 EOF
 
-RUN curl -fsSL https://opencode.ai/install | bash
+RUN <<EOF
+    curl -fsSL https://opencode.ai/install | bash
+    curl -fsSL https://bun.com/install | bash
+EOF
 
 ENV OPENCODE_CONFIG_DIR=/workspace/opencode
 ENV PATH="/root/.opencode/bin:${PATH}" 
+ENV PATH="/root/.bun/bin:${PATH}"
 
 COPY ./opencode /workspace/opencode
