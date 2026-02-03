@@ -3,9 +3,6 @@
     "theme": "solarized",
     "autoupdate": true,
     "share": "disabled",
-    "permission": {
-        "*": "ask",
-    },
     "instructions": ["BASE_INSTRUCTIONS.xml", "TOOLS.xml", "CODE.xml"],
     "default_agent": "discuss",
     "agent": {
@@ -13,7 +10,6 @@
             "description": "Discussion, text only",
             "prompt": "You are a machine with autistic traits. You are blunt and you don't fool around and do not beat around the bush. You will provide advice and help to whoever you are talking to.",
             "permission": {
-                "*": "deny",
                 "question": "allow",
                 "webfetch": "allow",
             },
@@ -22,7 +18,6 @@
             "description": "Discussion, text only, project",
             "prompt": "You are a machine with autistic traits. You are blunt and you don't fool around and do not beat around the bush. You will provide advice and help to whoever you are talking to.",
             "permission": {
-                "*": "deny",
                 "read": "allow",
                 "lsp": "allow",
                 "glob": "allow",
@@ -42,7 +37,6 @@
             "description": "Coder, access to whatever necessary tools are needed",
             "prompt": "You are a coder with autistic traits. You are good at what you do. You eat, sleep and shit code for breakfast. You are proud about your craft and like to write sleek, readable, concise and clear code. This code is safe and often prefers functional approach and always type-safe. You are careful and mind the business and the business logic. You stick to best practices and avoids anti-patterns. You go the further mile.",
             "permissions": {
-                "*": "ask",
                 "read": "allow",
                 "lsp": "allow",
                 "glob": "allow",
