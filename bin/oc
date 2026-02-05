@@ -2,6 +2,13 @@
 
 IMAGE_NAME="opencode-sandbox"
 CONTAINER_PREFIX="opencode"
+HOST_DATA_DIR="${HOME}/.local/share/opencode"
+OLLAMA_VOLUME="opencode-ollama-data"
+
+# Optional: User config directory to complement/override base config
+# Set OPENCODE_CONFIG_HOST to mount custom config over the base image config
+# Example: export OPENCODE_CONFIG_HOST="$HOME/.config/opencode"
+HOST_CONFIG_DIR="${OPENCODE_CONFIG_HOST:-}"
 
 usage() {
 	cat <<EOF
@@ -17,13 +24,23 @@ Options:
   --mount   Mount current working directory to /workspace/project
   --help    Show this help message
 
+Environment Variables:
+  OPENCODE_CONFIG_HOST   Path to custom opencode config directory to mount
+                         over the base config from the Docker image.
+                         If not set, uses the base config baked into the image.
+
 Examples:
-  $(basename "$0") feature-auth           # Start container named 'opencode-feature-auth'
-  $(basename "$0") bugfix --mount         # Start with current directory mounted
+  $(basename "$0") feature-auth                  # Start with base image config
+  OPENCODE_CONFIG_HOST=~/.config/opencode \\
+    $(basename "$0") myproject                   # Start with custom config
+  $(basename "$0") bugfix --mount                # Start with current dir mounted
 
 Notes:
-  - If a container with the same name exists, it will re-attach to it
-  - Containers persist after exit; run 'docker container prune' to clean up
+   - If a container with the same name exists, it will re-attach to it
+   - Containers persist after exit; run 'docker container prune' to clean up
+   - Sessions and auth are shared via ~/.local/share/opencode on the host
+   - Ollama models are shared across all sandboxes via Docker volume 'opencode-ollama-data'
+     (Models downloaded in one sandbox are available in all others)
 EOF
 }
 
@@ -41,11 +58,18 @@ fi
 
 CONTAINER_NAME="${CONTAINER_PREFIX}-${NAME}"
 
-# Check if container already exists
+mkdir -p "${HOST_DATA_DIR}"
+
+if ! docker volume inspect "${OLLAMA_VOLUME}" &>/dev/null; then
+	echo "Creating shared Ollama volume: ${OLLAMA_VOLUME}"
+	docker volume create "${OLLAMA_VOLUME}"
+else
+	echo "Using existing Ollama volume: ${OLLAMA_VOLUME}"
+fi
+
 if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
 	echo "Container '${CONTAINER_NAME}' already exists."
 	
-	# Check if mount target is already occupied when using --mount
 	if [ "$MOUNT_VOL" = true ]; then
 		if docker exec "${CONTAINER_NAME}" test -d /workspace/project 2>/dev/null; then
 			echo "Error: Mount target /workspace/project already exists in container '${CONTAINER_NAME}'"
@@ -63,8 +87,23 @@ if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
 	exit 0
 fi
 
-# Build run command
 RUN_CMD="docker run -it --name ${CONTAINER_NAME}"
+
+# Add shared bind mounts from host:
+# 1. Host data directory (auth.json, logs, sessions) - always mounted
+RUN_CMD="${RUN_CMD} -v \"${HOST_DATA_DIR}\":/root/.local/share/opencode"
+# 2. Shared Ollama volume (models data shared across all sandboxes)
+RUN_CMD="${RUN_CMD} -v ${OLLAMA_VOLUME}:/root/.ollama"
+# 3. Optional: Host config directory to override base image config
+if [ -n "${HOST_CONFIG_DIR}" ]; then
+	if [ -d "${HOST_CONFIG_DIR}" ]; then
+		RUN_CMD="${RUN_CMD} -v \"${HOST_CONFIG_DIR}\":/workspace/opencode"
+		echo "Using custom config from: ${HOST_CONFIG_DIR}"
+	else
+		echo "Warning: OPENCODE_CONFIG_HOST directory not found: ${HOST_CONFIG_DIR}"
+		echo "Using base config from Docker image"
+	fi
+fi
 
 if [ "$MOUNT_VOL" = true ]; then
 	RUN_CMD="${RUN_CMD} -v \"$(pwd)\":/workspace/project"
@@ -72,6 +111,7 @@ if [ "$MOUNT_VOL" = true ]; then
 else
 	echo "Starting '${CONTAINER_NAME}'"
 fi
+echo "Ollama models shared via volume: ${OLLAMA_VOLUME}"
 
 RUN_CMD="${RUN_CMD} ${IMAGE_NAME} opencode"
 

@@ -3,7 +3,7 @@
     "theme": "solarized",
     "autoupdate": true,
     "share": "disabled",
-    "instructions": ["BASE_INSTRUCTIONS.xml", "TOOLS.xml", "CODE.xml"],
+    "instructions": ["instructions/BASE_INSTRUCTIONS.xml", "instructions/TOOLS.xml", "instructions/CODE.xml"],
     "default_agent": "discuss",
     "agent": {
         "discuss": {

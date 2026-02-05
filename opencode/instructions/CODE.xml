@@ -2,4 +2,8 @@
     <no_comments_unless>No comments in code unless you need to explain why you needed to do something. You usually do not need to explain this</no_comments_unless>
     <inverted_if>Use inverted if statements to reduce nesting where it improves readability and return to short circuit</inverted_if>
     <no_variable_for_alias>Do not create variables that are just aliases for other variables</no_variable_for_alias>
+    <no_unnecessary_indirection>
+    Don't add an extra layer of abstraction, function call, object, or wrapper that don’t actually improve the design, but rather makes the code
+    harder to read, understand or change. You could go directly from A → B, but instead you go A → X → Y → Z → B for no real benefit.
+    </no_unnecessary_indirection>
 </code_instructions>
