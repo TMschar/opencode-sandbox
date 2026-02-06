@@ -39,14 +39,17 @@ RUN <<EOF
     
     NODE_PATH=$(which node)
     NPM_PATH=$(which npm)
+    NPX_PATH=$(which npx)
     PNPM_PATH=$(which pnpm 2>/dev/null || echo "")
     
     ln -sf "$NODE_PATH" /usr/local/bin/node
     ln -sf "$NPM_PATH" /usr/local/bin/npm
+    ln -sf "$NPX_PATH" /usr/local/bin/npx
     [ -n "$PNPM_PATH" ] && ln -sf "$PNPM_PATH" /usr/local/bin/pnpm
     
     node --version
     npm --version
+    npx --version
     fnm --version
 EOF
 
@@ -56,7 +59,10 @@ RUN <<EOF
 EOF
 
 COPY ./opencode /workspace/opencode
+COPY ./entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 WORKDIR /workspace/project
 
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["bash"]

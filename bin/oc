@@ -12,16 +12,27 @@ HOST_CONFIG_DIR="${OPENCODE_CONFIG_HOST:-}"
 
 usage() {
 	cat <<EOF
-Usage: $(basename "$0") <name> [--mount]
+Usage: $(basename "$0") <command> <name> [options]
        $(basename "$0") --help
 
-Start an opencode sandbox container.
+Manage opencode sandbox containers.
+
+Commands:
+  run <name> [--mount]    Start a new sandbox or attach to existing one
+  start <name>            Start a stopped sandbox
+  restart <name>          Restart a sandbox
+  stop <name>             Stop a running sandbox
+  kill <name>             Force stop a running sandbox
+  remove <name>           Remove a sandbox container
+  exec <name> <command>   Execute a bash command in a running sandbox
+  shell <name>            Open an interactive shell in a running sandbox
+  list                    List all opencode sandbox containers
 
 Arguments:
   name      Name for the container (will be prefixed with 'opencode-')
 
 Options:
-  --mount   Mount current working directory to /workspace/project
+  --mount   Mount current working directory to /workspace/project (run only)
   --help    Show this help message
 
 Environment Variables:
@@ -30,89 +41,361 @@ Environment Variables:
                          If not set, uses the base config baked into the image.
 
 Examples:
-  $(basename "$0") feature-auth                  # Start with base image config
-  OPENCODE_CONFIG_HOST=~/.config/opencode \\
-    $(basename "$0") myproject                   # Start with custom config
-  $(basename "$0") bugfix --mount                # Start with current dir mounted
+  $(basename "$0") run feature-auth                # Start with base image config
+  $(basename "$0") run bugfix --mount              # Start with current dir mounted
+  $(basename "$0") stop myproject                  # Stop a running sandbox
+  $(basename "$0") restart myproject               # Restart a sandbox
+  $(basename "$0") kill myproject                  # Force stop a sandbox
+  $(basename "$0") remove myproject                # Remove a sandbox
+  $(basename "$0") exec myproject "ls -la"         # Run a command in sandbox
+  $(basename "$0") shell myproject                 # Open a shell in sandbox
+  $(basename "$0") list                            # List all sandboxes
 
 Notes:
-   - If a container with the same name exists, it will re-attach to it
-   - Containers persist after exit; run 'docker container prune' to clean up
+   - If a container with the same name exists, 'run' will re-attach to it
+   - Containers persist after exit; use 'remove' or 'docker container prune' to clean up
    - Sessions and auth are shared via ~/.local/share/opencode on the host
    - Ollama models are shared across all sandboxes via Docker volume 'opencode-ollama-data'
      (Models downloaded in one sandbox are available in all others)
 EOF
 }
 
+get_container_name() {
+	echo "${CONTAINER_PREFIX}-${1}"
+}
+
+container_exists() {
+	docker ps -a --format '{{.Names}}' | grep -q "^${1}$"
+}
+
+container_running() {
+	docker ps --format '{{.Names}}' | grep -q "^${1}$"
+}
+
+cmd_run() {
+	local NAME="$1"
+	local MOUNT_VOL=false
+
+	if [ -z "$NAME" ]; then
+		echo "Error: Container name is required"
+		echo "Usage: $(basename "$0") run <name> [--mount]"
+		exit 1
+	fi
+
+	if [ "$2" == "--mount" ]; then
+		MOUNT_VOL=true
+	fi
+
+	local CONTAINER_NAME
+	CONTAINER_NAME=$(get_container_name "$NAME")
+
+	mkdir -p "${HOST_DATA_DIR}"
+
+	if ! docker volume inspect "${OLLAMA_VOLUME}" &>/dev/null; then
+		echo "Creating shared Ollama volume: ${OLLAMA_VOLUME}"
+		docker volume create "${OLLAMA_VOLUME}"
+	else
+		echo "Using existing Ollama volume: ${OLLAMA_VOLUME}"
+	fi
+
+	if container_exists "$CONTAINER_NAME"; then
+		echo "Container '${CONTAINER_NAME}' already exists."
+		
+		if [ "$MOUNT_VOL" = true ]; then
+			if docker exec "${CONTAINER_NAME}" test -d /workspace/project 2>/dev/null; then
+				echo "Error: Mount target /workspace/project already exists in container '${CONTAINER_NAME}'"
+				echo "Either:"
+				echo "  1. Use without --mount, or"
+				echo "  2. Start a new container with a different name, or"
+				echo "  3. Remove the directory inside the container first"
+				exit 1
+			fi
+		fi
+		
+		echo "Attaching to existing container..."
+		docker start "${CONTAINER_NAME}" 2>/dev/null
+		docker exec -it "${CONTAINER_NAME}" bash -c "opencode"
+		exit 0
+	fi
+
+	RUN_CMD="docker run -it --name ${CONTAINER_NAME}"
+
+	# Add shared bind mounts from host:
+	# 1. Host data directory (auth.json, logs, sessions) - always mounted
+	RUN_CMD="${RUN_CMD} -v \"${HOST_DATA_DIR}\":/root/.local/share/opencode"
+	# 2. Shared Ollama volume (models data shared across all sandboxes)
+	RUN_CMD="${RUN_CMD} -v ${OLLAMA_VOLUME}:/root/.ollama"
+	# 3. Optional: Host config directory to override base image config
+	if [ -n "${HOST_CONFIG_DIR}" ]; then
+		if [ -d "${HOST_CONFIG_DIR}" ]; then
+			RUN_CMD="${RUN_CMD} -v \"${HOST_CONFIG_DIR}\":/workspace/opencode"
+			echo "Using custom config from: ${HOST_CONFIG_DIR}"
+		else
+			echo "Warning: OPENCODE_CONFIG_HOST directory not found: ${HOST_CONFIG_DIR}"
+			echo "Using base config from Docker image"
+		fi
+	fi
+
+	if [ "$MOUNT_VOL" = true ]; then
+		RUN_CMD="${RUN_CMD} -v \"$(pwd)\":/workspace/project"
+		echo "Starting '${CONTAINER_NAME}' with $(pwd) mounted to /workspace/project"
+	else
+		echo "Starting '${CONTAINER_NAME}'"
+	fi
+	echo "Ollama models shared via volume: ${OLLAMA_VOLUME}"
+
+	RUN_CMD="${RUN_CMD} ${IMAGE_NAME} opencode"
+
+	eval "${RUN_CMD}"
+}
+
+cmd_start() {
+	local NAME="$1"
+
+	if [ -z "$NAME" ]; then
+		echo "Error: Container name is required"
+		echo "Usage: $(basename "$0") start <name>"
+		exit 1
+	fi
+
+	local CONTAINER_NAME
+	CONTAINER_NAME=$(get_container_name "$NAME")
+
+	if ! container_exists "$CONTAINER_NAME"; then
+		echo "Error: Container '${CONTAINER_NAME}' does not exist"
+		echo "Use '$(basename "$0") run ${NAME}' to create a new sandbox"
+		exit 1
+	fi
+
+	if container_running "$CONTAINER_NAME"; then
+		echo "Container '${CONTAINER_NAME}' is already running"
+		echo "Attaching to container..."
+		docker exec -it "${CONTAINER_NAME}" bash -c "opencode"
+	else
+		echo "Starting container '${CONTAINER_NAME}'..."
+		docker start "${CONTAINER_NAME}"
+		docker exec -it "${CONTAINER_NAME}" bash -c "opencode"
+	fi
+}
+
+cmd_stop() {
+	local NAME="$1"
+
+	if [ -z "$NAME" ]; then
+		echo "Error: Container name is required"
+		echo "Usage: $(basename "$0") stop <name>"
+		exit 1
+	fi
+
+	local CONTAINER_NAME
+	CONTAINER_NAME=$(get_container_name "$NAME")
+
+	if ! container_exists "$CONTAINER_NAME"; then
+		echo "Error: Container '${CONTAINER_NAME}' does not exist"
+		exit 1
+	fi
+
+	if ! container_running "$CONTAINER_NAME"; then
+		echo "Container '${CONTAINER_NAME}' is not running"
+		exit 0
+	fi
+
+	echo "Stopping container '${CONTAINER_NAME}'..."
+	docker stop "${CONTAINER_NAME}"
+	echo "Container '${CONTAINER_NAME}' stopped"
+}
+
+cmd_restart() {
+	local NAME="$1"
+
+	if [ -z "$NAME" ]; then
+		echo "Error: Container name is required"
+		echo "Usage: $(basename "$0") restart <name>"
+		exit 1
+	fi
+
+	local CONTAINER_NAME
+	CONTAINER_NAME=$(get_container_name "$NAME")
+
+	if ! container_exists "$CONTAINER_NAME"; then
+		echo "Error: Container '${CONTAINER_NAME}' does not exist"
+		echo "Use '$(basename "$0") run ${NAME}' to create a new sandbox"
+		exit 1
+	fi
+
+	echo "Restarting container '${CONTAINER_NAME}'..."
+	docker restart "${CONTAINER_NAME}"
+	echo "Container '${CONTAINER_NAME}' restarted"
+	echo "Attaching to container..."
+	docker exec -it "${CONTAINER_NAME}" bash -c "opencode"
+}
+
+cmd_kill() {
+	local NAME="$1"
+
+	if [ -z "$NAME" ]; then
+		echo "Error: Container name is required"
+		echo "Usage: $(basename "$0") kill <name>"
+		exit 1
+	fi
+
+	local CONTAINER_NAME
+	CONTAINER_NAME=$(get_container_name "$NAME")
+
+	if ! container_exists "$CONTAINER_NAME"; then
+		echo "Error: Container '${CONTAINER_NAME}' does not exist"
+		exit 1
+	fi
+
+	if ! container_running "$CONTAINER_NAME"; then
+		echo "Container '${CONTAINER_NAME}' is not running"
+		exit 0
+	fi
+
+	echo "Killing container '${CONTAINER_NAME}'..."
+	docker kill "${CONTAINER_NAME}"
+	echo "Container '${CONTAINER_NAME}' killed"
+}
+
+cmd_remove() {
+	local NAME="$1"
+
+	if [ -z "$NAME" ]; then
+		echo "Error: Container name is required"
+		echo "Usage: $(basename "$0") remove <name>"
+		exit 1
+	fi
+
+	local CONTAINER_NAME
+	CONTAINER_NAME=$(get_container_name "$NAME")
+
+	if ! container_exists "$CONTAINER_NAME"; then
+		echo "Error: Container '${CONTAINER_NAME}' does not exist"
+		exit 1
+	fi
+
+	if container_running "$CONTAINER_NAME"; then
+		echo "Container '${CONTAINER_NAME}' is running. Stopping first..."
+		docker stop "${CONTAINER_NAME}"
+	fi
+
+	echo "Removing container '${CONTAINER_NAME}'..."
+	docker rm "${CONTAINER_NAME}"
+	echo "Container '${CONTAINER_NAME}' removed"
+}
+
+cmd_list() {
+	echo "Opencode sandbox containers:"
+	echo ""
+	docker ps -a --filter "name=^${CONTAINER_PREFIX}-" --format "table {{.Names}}\t{{.Status}}\t{{.CreatedAt}}"
+}
+
+cmd_exec() {
+	local NAME="$1"
+	shift
+
+	if [ -z "$NAME" ]; then
+		echo "Error: Container name is required"
+		echo "Usage: $(basename "$0") exec <name> <command>"
+		exit 1
+	fi
+
+	if [ -z "$1" ]; then
+		echo "Error: Command is required"
+		echo "Usage: $(basename "$0") exec <name> <command>"
+		exit 1
+	fi
+
+	local CONTAINER_NAME
+	CONTAINER_NAME=$(get_container_name "$NAME")
+
+	if ! container_exists "$CONTAINER_NAME"; then
+		echo "Error: Container '${CONTAINER_NAME}' does not exist"
+		exit 1
+	fi
+
+	if ! container_running "$CONTAINER_NAME"; then
+		echo "Error: Container '${CONTAINER_NAME}' is not running"
+		echo "Use '$(basename "$0") start ${NAME}' to start it first"
+		exit 1
+	fi
+
+	docker exec -it "${CONTAINER_NAME}" bash -c "$*"
+}
+
+cmd_shell() {
+	local NAME="$1"
+
+	if [ -z "$NAME" ]; then
+		echo "Error: Container name is required"
+		echo "Usage: $(basename "$0") shell <name>"
+		exit 1
+	fi
+
+	local CONTAINER_NAME
+	CONTAINER_NAME=$(get_container_name "$NAME")
+
+	if ! container_exists "$CONTAINER_NAME"; then
+		echo "Error: Container '${CONTAINER_NAME}' does not exist"
+		exit 1
+	fi
+
+	if ! container_running "$CONTAINER_NAME"; then
+		echo "Error: Container '${CONTAINER_NAME}' is not running"
+		echo "Use '$(basename "$0") start ${NAME}' to start it first"
+		exit 1
+	fi
+
+	echo "Opening shell in '${CONTAINER_NAME}'..."
+	docker exec -it "${CONTAINER_NAME}" bash
+}
+
+# Main command parsing
 if [ -z "$1" ] || [ "$1" == "-h" ] || [ "$1" == "--help" ]; then
 	usage
 	exit 0
 fi
 
-NAME="$1"
-MOUNT_VOL=false
+COMMAND="$1"
+shift
 
-if [ "$2" == "--mount" ]; then
-	MOUNT_VOL=true
-fi
-
-CONTAINER_NAME="${CONTAINER_PREFIX}-${NAME}"
-
-mkdir -p "${HOST_DATA_DIR}"
-
-if ! docker volume inspect "${OLLAMA_VOLUME}" &>/dev/null; then
-	echo "Creating shared Ollama volume: ${OLLAMA_VOLUME}"
-	docker volume create "${OLLAMA_VOLUME}"
-else
-	echo "Using existing Ollama volume: ${OLLAMA_VOLUME}"
-fi
-
-if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
-	echo "Container '${CONTAINER_NAME}' already exists."
-	
-	if [ "$MOUNT_VOL" = true ]; then
-		if docker exec "${CONTAINER_NAME}" test -d /workspace/project 2>/dev/null; then
-			echo "Error: Mount target /workspace/project already exists in container '${CONTAINER_NAME}'"
-			echo "Either:"
-			echo "  1. Use without --mount, or"
-			echo "  2. Start a new container with a different name, or"
-			echo "  3. Remove the directory inside the container first"
+case "$COMMAND" in
+	run)
+		cmd_run "$@"
+		;;
+	start)
+		cmd_start "$@"
+		;;
+	stop)
+		cmd_stop "$@"
+		;;
+	restart)
+		cmd_restart "$@"
+		;;
+	kill)
+		cmd_kill "$@"
+		;;
+	remove|rm)
+		cmd_remove "$@"
+		;;
+	exec)
+		cmd_exec "$@"
+		;;
+	shell|sh)
+		cmd_shell "$@"
+		;;
+	list|ls)
+		cmd_list
+		;;
+	*)
+		# Backwards compatibility: treat first arg as container name for 'run'
+		# Check if it looks like a name (doesn't start with -)
+		if [[ ! "$COMMAND" =~ ^- ]]; then
+			cmd_run "$COMMAND" "$@"
+		else
+			echo "Error: Unknown command '$COMMAND'"
+			echo "Run '$(basename "$0") --help' for usage"
 			exit 1
 		fi
-	fi
-	
-	echo "Attaching to existing container..."
-	docker start "${CONTAINER_NAME}" 2>/dev/null
-	docker exec -it "${CONTAINER_NAME}" bash -c "opencode"
-	exit 0
-fi
-
-RUN_CMD="docker run -it --name ${CONTAINER_NAME}"
-
-# Add shared bind mounts from host:
-# 1. Host data directory (auth.json, logs, sessions) - always mounted
-RUN_CMD="${RUN_CMD} -v \"${HOST_DATA_DIR}\":/root/.local/share/opencode"
-# 2. Shared Ollama volume (models data shared across all sandboxes)
-RUN_CMD="${RUN_CMD} -v ${OLLAMA_VOLUME}:/root/.ollama"
-# 3. Optional: Host config directory to override base image config
-if [ -n "${HOST_CONFIG_DIR}" ]; then
-	if [ -d "${HOST_CONFIG_DIR}" ]; then
-		RUN_CMD="${RUN_CMD} -v \"${HOST_CONFIG_DIR}\":/workspace/opencode"
-		echo "Using custom config from: ${HOST_CONFIG_DIR}"
-	else
-		echo "Warning: OPENCODE_CONFIG_HOST directory not found: ${HOST_CONFIG_DIR}"
-		echo "Using base config from Docker image"
-	fi
-fi
-
-if [ "$MOUNT_VOL" = true ]; then
-	RUN_CMD="${RUN_CMD} -v \"$(pwd)\":/workspace/project"
-	echo "Starting '${CONTAINER_NAME}' with $(pwd) mounted to /workspace/project"
-else
-	echo "Starting '${CONTAINER_NAME}'"
-fi
-echo "Ollama models shared via volume: ${OLLAMA_VOLUME}"
-
-RUN_CMD="${RUN_CMD} ${IMAGE_NAME} opencode"
-
-eval "${RUN_CMD}"
+		;;
+esac
