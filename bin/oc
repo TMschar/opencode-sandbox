@@ -287,7 +287,7 @@ cmd_remove() {
 cmd_list() {
 	echo "Opencode sandbox containers:"
 	echo ""
-	docker ps -a --filter "name=^${CONTAINER_PREFIX}-" --format "table {{.Names}}\t{{.Status}}\t{{.CreatedAt}}"
+	docker ps -a --filter "name=^${CONTAINER_PREFIX}-" --format "table {{.Names}}\t{{.Status}}\t{{.CreatedAt}}" | sed "s/${CONTAINER_PREFIX}-//"
 }
 
 cmd_exec() {
