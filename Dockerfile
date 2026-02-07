@@ -53,11 +53,6 @@ RUN <<EOF
     fnm --version
 EOF
 
-RUN <<EOF
-    curl -fsSL https://ollama.com/install.sh | sh
-    ollama --version
-EOF
-
 COPY ./opencode /workspace/opencode
 COPY ./entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

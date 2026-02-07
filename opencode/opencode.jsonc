@@ -3,6 +3,8 @@
     "theme": "solarized",
     "autoupdate": true,
     "share": "disabled",
+    "model": "github-copilot/claude-opus-4.6",
+    "small_model": "github-copilot/gemini-3-flash-preview",
     "instructions": ["instructions/BASE_INSTRUCTIONS.xml", "instructions/TOOLS.xml", "instructions/CODE.xml"],
     "default_agent": "discuss",
     "agent": {

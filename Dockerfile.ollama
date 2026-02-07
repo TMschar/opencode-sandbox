@@ -1,0 +1,7 @@
+FROM opencode-sandbox:latest
+
+# Install Ollama
+RUN <<EOF
+    curl -fsSL https://ollama.com/install.sh | sh
+    ollama --version
+EOF

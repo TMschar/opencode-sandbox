@@ -1,6 +1,7 @@
 #!/bin/bash
 
 IMAGE_NAME="opencode-sandbox"
+IMAGE_NAME_OLLAMA="opencode-sandbox-ollama"
 CONTAINER_PREFIX="opencode"
 HOST_DATA_DIR="${HOME}/.local/share/opencode"
 OLLAMA_VOLUME="opencode-ollama-data"
@@ -18,7 +19,7 @@ Usage: $(basename "$0") <command> <name> [options]
 Manage opencode sandbox containers.
 
 Commands:
-  run <name> [--mount]    Start a new sandbox or attach to existing one
+  run <name> [options]    Start a new sandbox or attach to existing one
   start <name>            Start a stopped sandbox
   restart <name>          Restart a sandbox
   stop <name>             Stop a running sandbox
@@ -27,13 +28,15 @@ Commands:
   exec <name> <command>   Execute a bash command in a running sandbox
   shell <name>            Open an interactive shell in a running sandbox
   list                    List all opencode sandbox containers
+  build [--ollama]        Build Docker images (cleans up old dangling images)
 
 Arguments:
   name      Name for the container (will be prefixed with 'opencode-')
 
 Options:
-  --mount   Mount current working directory to /workspace/project (run only)
-  --help    Show this help message
+  --mount       Mount current working directory to /workspace/project (run only)
+  --ollama      Use the Ollama-enabled image (opencode-sandbox-ollama)
+  --help        Show this help message
 
 Environment Variables:
   OPENCODE_CONFIG_HOST   Path to custom opencode config directory to mount
@@ -41,8 +44,10 @@ Environment Variables:
                          If not set, uses the base config baked into the image.
 
 Examples:
-  $(basename "$0") run feature-auth                # Start with base image config
+  $(basename "$0") run feature-auth                # Start with base image (no Ollama)
   $(basename "$0") run bugfix --mount              # Start with current dir mounted
+  $(basename "$0") run myproject --ollama          # Start with Ollama support
+  $(basename "$0") run myproject --mount --ollama  # Mount dir + Ollama support
   $(basename "$0") stop myproject                  # Stop a running sandbox
   $(basename "$0") restart myproject               # Restart a sandbox
   $(basename "$0") kill myproject                  # Force stop a sandbox
@@ -55,8 +60,8 @@ Notes:
    - If a container with the same name exists, 'run' will re-attach to it
    - Containers persist after exit; use 'remove' or 'docker container prune' to clean up
    - Sessions and auth are shared via ~/.local/share/opencode on the host
+   - Use --ollama to use the Ollama-enabled image with local LLM support
    - Ollama models are shared across all sandboxes via Docker volume 'opencode-ollama-data'
-     (Models downloaded in one sandbox are available in all others)
 EOF
 }
 
@@ -75,27 +80,47 @@ container_running() {
 cmd_run() {
 	local NAME="$1"
 	local MOUNT_VOL=false
+	local USE_OLLAMA=false
 
 	if [ -z "$NAME" ]; then
 		echo "Error: Container name is required"
-		echo "Usage: $(basename "$0") run <name> [--mount]"
+		echo "Usage: $(basename "$0") run <name> [--mount] [--ollama]"
 		exit 1
 	fi
 
-	if [ "$2" == "--mount" ]; then
-		MOUNT_VOL=true
-	fi
+	shift
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--mount)
+				MOUNT_VOL=true
+				;;
+			--ollama)
+				USE_OLLAMA=true
+				;;
+			*)
+				echo "Error: Unknown option '$1'"
+				exit 1
+				;;
+		esac
+		shift
+	done
 
 	local CONTAINER_NAME
 	CONTAINER_NAME=$(get_container_name "$NAME")
 
 	mkdir -p "${HOST_DATA_DIR}"
 
-	if ! docker volume inspect "${OLLAMA_VOLUME}" &>/dev/null; then
-		echo "Creating shared Ollama volume: ${OLLAMA_VOLUME}"
-		docker volume create "${OLLAMA_VOLUME}"
-	else
-		echo "Using existing Ollama volume: ${OLLAMA_VOLUME}"
+	# Determine which image to use
+	local SELECTED_IMAGE="${IMAGE_NAME}"
+	if [ "$USE_OLLAMA" = true ]; then
+		SELECTED_IMAGE="${IMAGE_NAME_OLLAMA}"
+		# Create/use Ollama volume only if Ollama is enabled
+		if ! docker volume inspect "${OLLAMA_VOLUME}" &>/dev/null; then
+			echo "Creating shared Ollama volume: ${OLLAMA_VOLUME}"
+			docker volume create "${OLLAMA_VOLUME}"
+		else
+			echo "Using existing Ollama volume: ${OLLAMA_VOLUME}"
+		fi
 	fi
 
 	if container_exists "$CONTAINER_NAME"; then
@@ -123,8 +148,10 @@ cmd_run() {
 	# Add shared bind mounts from host:
 	# 1. Host data directory (auth.json, logs, sessions) - always mounted
 	RUN_CMD="${RUN_CMD} -v \"${HOST_DATA_DIR}\":/root/.local/share/opencode"
-	# 2. Shared Ollama volume (models data shared across all sandboxes)
-	RUN_CMD="${RUN_CMD} -v ${OLLAMA_VOLUME}:/root/.ollama"
+	# 2. Shared Ollama volume (models data shared across all sandboxes) - only if using Ollama
+	if [ "$USE_OLLAMA" = true ]; then
+		RUN_CMD="${RUN_CMD} -v ${OLLAMA_VOLUME}:/root/.ollama"
+	fi
 	# 3. Optional: Host config directory to override base image config
 	if [ -n "${HOST_CONFIG_DIR}" ]; then
 		if [ -d "${HOST_CONFIG_DIR}" ]; then
@@ -142,9 +169,12 @@ cmd_run() {
 	else
 		echo "Starting '${CONTAINER_NAME}'"
 	fi
-	echo "Ollama models shared via volume: ${OLLAMA_VOLUME}"
+	if [ "$USE_OLLAMA" = true ]; then
+		echo "Using Ollama image: ${SELECTED_IMAGE}"
+		echo "Ollama models shared via volume: ${OLLAMA_VOLUME}"
+	fi
 
-	RUN_CMD="${RUN_CMD} ${IMAGE_NAME} opencode"
+	RUN_CMD="${RUN_CMD} ${SELECTED_IMAGE} opencode"
 
 	eval "${RUN_CMD}"
 }
@@ -350,6 +380,75 @@ cmd_shell() {
 	docker exec -it "${CONTAINER_NAME}" bash
 }
 
+cmd_build() {
+	local BUILD_OLLAMA=false
+
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--ollama)
+				BUILD_OLLAMA=true
+				;;
+			*)
+				echo "Error: Unknown option '$1'"
+				exit 1
+				;;
+		esac
+		shift
+	done
+
+	# Find the directory where this script is located
+	local SCRIPT_DIR
+	SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+	local PROJECT_DIR
+	PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+	if [ ! -f "${PROJECT_DIR}/Dockerfile" ]; then
+		echo "Error: Dockerfile not found in ${PROJECT_DIR}"
+		exit 1
+	fi
+
+	echo "=== Cleaning up dangling images ==="
+	local DANGLING
+	DANGLING=$(docker images -f "dangling=true" -q)
+	if [ -n "$DANGLING" ]; then
+		echo "Removing dangling images..."
+		docker rmi $DANGLING 2>/dev/null || true
+	else
+		echo "No dangling images to clean up"
+	fi
+
+	# Check for old versions of our images that aren't in use
+	echo ""
+	echo "=== Checking for unused old images ==="
+	for img in "${IMAGE_NAME}" "${IMAGE_NAME_OLLAMA}"; do
+		local OLD_IMAGES
+		OLD_IMAGES=$(docker images "$img" --format "{{.ID}}" | tail -n +2)
+		if [ -n "$OLD_IMAGES" ]; then
+			echo "Removing old $img images..."
+			docker rmi $OLD_IMAGES 2>/dev/null || echo "  Some images in use, skipped"
+		fi
+	done
+
+	echo ""
+	echo "=== Building base image: ${IMAGE_NAME} ==="
+	docker build -t "${IMAGE_NAME}" "${PROJECT_DIR}"
+
+	if [ "$BUILD_OLLAMA" = true ]; then
+		if [ ! -f "${PROJECT_DIR}/Dockerfile.ollama" ]; then
+			echo "Error: Dockerfile.ollama not found in ${PROJECT_DIR}"
+			exit 1
+		fi
+
+		echo ""
+		echo "=== Building Ollama image: ${IMAGE_NAME_OLLAMA} ==="
+		docker build -f "${PROJECT_DIR}/Dockerfile.ollama" -t "${IMAGE_NAME_OLLAMA}" "${PROJECT_DIR}"
+	fi
+
+	echo ""
+	echo "=== Build complete ==="
+	docker images | grep -E "REPOSITORY|${IMAGE_NAME}"
+}
+
 # Main command parsing
 if [ -z "$1" ] || [ "$1" == "-h" ] || [ "$1" == "--help" ]; then
 	usage
@@ -386,6 +485,9 @@ case "$COMMAND" in
 		;;
 	list|ls)
 		cmd_list
+		;;
+	build)
+		cmd_build "$@"
 		;;
 	*)
 		# Backwards compatibility: treat first arg as container name for 'run'
