@@ -7,7 +7,7 @@ ENV HOME=/root
 RUN <<EOF
     apt update
     apt upgrade -y
-    apt install -y curl wget ca-certificates unzip ripgrep fd-find git zstd
+    apt install -y curl wget ca-certificates unzip ripgrep fd-find git zstd python3-pip
 EOF
 
 ENV OPENCODE_CONFIG_DIR=/workspace/opencode
@@ -17,7 +17,8 @@ RUN <<EOF
     curl -fsSL https://opencode.ai/install | bash
     curl -fsSL https://bun.com/install | bash
     curl -fsSL https://fnm.vercel.app/install | bash
-    
+    pip3 install apprise
+
     # Remove the auto-generated fnm config from .bashrc (it uses 'fnm env' without --shell)
     sed -i '/# fnm/,/fi/d' /root/.bashrc
     

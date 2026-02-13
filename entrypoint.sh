@@ -8,5 +8,18 @@ if command -v ollama &>/dev/null; then
     sleep 2
 fi
 
-# Execute the command passed to the container (or bash by default)
-exec "${@:-bash}"
+if [ $# -gt 0 ]; then
+    echo "Executing: $@"
+    "$@"
+    exit_code=$?
+    echo "Command completed with exit code $exit_code"
+
+    if command -v apprise &>/dev/null; then
+        apprise -b "Opencode task completed with exit code $exit_code" "$APPRISE_URL"
+    else
+        echo "⚠️ Warning: Apprise not installed - notifications skipped"
+    fi
+    exec sleep infinity
+else
+    exec bash
+fi
